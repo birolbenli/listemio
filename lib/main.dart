@@ -9,9 +9,12 @@ import 'models/shopping_item.dart';
 import 'screens/shopping_list_detail_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('tr_TR', null);
   await Hive.initFlutter();
   Hive.registerAdapter(ShoppingListAdapter());
   Hive.registerAdapter(ShoppingListStatusAdapter());
@@ -135,6 +138,66 @@ class _ShoppingListsScreenState extends State<ShoppingListsScreen> with SingleTi
     );
   }
 
+  void _showSmartListDialog() async {
+    final _formKey = GlobalKey<FormState>();
+    String prompt = '';
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Akıllı Liste Oluştur'),
+        content: Form(
+          key: _formKey,
+          child: TextFormField(
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'İhtiyacınızı doğal dilde yazın (ör: Kahvaltılık ve temizlik malzemeleri al)',
+            ),
+            validator: (value) => (value == null || value.trim().isEmpty) ? 'Lütfen bir şey yazın' : null,
+            onSaved: (value) => prompt = value!.trim(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('İptal'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (_formKey.currentState!.validate()) {
+                _formKey.currentState!.save();
+                Navigator.pop(context);
+                await _generateSmartList(prompt);
+              }
+            },
+            child: const Text('Oluştur'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _generateSmartList(String prompt) async {
+    // Basit anahtar kelime eşleme ile örnek (LLM API ile daha gelişmişi yapılabilir)
+    final lower = prompt.toLowerCase();
+    final List<String> kahvaltilik = ['Ekmek', 'Peynir', 'Zeytin', 'Yumurta', 'Süt', 'Domates', 'Salatalık'];
+    final List<String> temizlik = ['Deterjan', 'Şampuan', 'Sabun', 'Bulaşık deterjanı'];
+    final List<String> market = ['Makarna', 'Pirinç', 'Patates', 'Soğan', 'Elma', 'Muz'];
+    List<String> urunler = [];
+    if (lower.contains('kahvaltı')) urunler.addAll(kahvaltilik);
+    if (lower.contains('temizlik')) urunler.addAll(temizlik);
+    if (lower.contains('market')) urunler.addAll(market);
+    if (urunler.isEmpty) urunler = ['Ekmek', 'Süt', 'Yumurta'];
+    final newList = ShoppingList(
+      title: 'Akıllı Liste',
+      createdAt: DateTime.now(),
+      status: ShoppingListStatus.open,
+      items: urunler.map((e) => ShoppingItem(name: e)).toList(),
+    );
+    shoppingListBox.add(newList);
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Akıllı liste oluşturuldu.')));
+  }
+
   @override
   void dispose() {
     _tabController.dispose();
@@ -160,12 +223,40 @@ class _ShoppingListsScreenState extends State<ShoppingListsScreen> with SingleTi
               );
             },
           ),
+          IconButton(
+            icon: const Icon(Icons.auto_awesome),
+            tooltip: 'Akıllı Liste Oluştur',
+            onPressed: _showSmartListDialog,
+          ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Açık Listeler'),
-            Tab(text: 'Tamamlanmış'),
+      ),
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            DrawerHeader(
+              decoration: BoxDecoration(color: Colors.teal.shade200),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text('Listemio', style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold)),
+                  SizedBox(height: 8),
+                  Text('Akıllı Alışveriş Listesi', style: TextStyle(color: Colors.white70)),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Hakkında'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AboutScreen()),
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -264,6 +355,53 @@ class _ShoppingListsScreenState extends State<ShoppingListsScreen> with SingleTi
           ),
         );
       },
+    );
+  }
+}
+
+class AboutScreen extends StatelessWidget {
+  const AboutScreen({super.key});
+
+  Future<Map<String, String>> _getAppInfo() async {
+    final info = await PackageInfo.fromPlatform();
+    return {
+      'appName': info.appName,
+      'version': info.version,
+      'buildNumber': info.buildNumber,
+      'packageName': info.packageName,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Hakkında')),
+      body: FutureBuilder<Map<String, String>>(
+        future: _getAppInfo(),
+        builder: (context, snapshot) {
+          final info = snapshot.data;
+          return Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Listemio', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Text('Geliştirici: Birol Benli'),
+                Text('E-posta: birolbenli@gmail.com'),
+                if (info != null) ...[
+                  Text('Versiyon: ${info['version']}+${info['buildNumber']}'),
+                  Text('Paket: ${info['packageName']}'),
+                ],
+                const SizedBox(height: 24),
+                const Text('Modern, yapay zekalı alışveriş listesi uygulaması.'),
+                const SizedBox(height: 8),
+                const Text('© 2025 Birol Benli'),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }
